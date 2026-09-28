@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jennah-memchat"
+version = "0.1.0"
+description = "A chatbot that remembers across sessions, built on Jennah's Python SDK"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+  "jennah-sdk-py>=0.61.0",
+  "anthropic>=1.8",
+  "google-genai>=2.25",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+memchat = "memchat.__main__:main"
+
+[project.urls]
+Source = "https://github.com/nightblue-io/jennah-memchat-py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["memchat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

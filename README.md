@@ -41,12 +41,18 @@ pip install .
 ## Run
 
 ```sh
-export JENNAH_API_KEY=jennah_sk_...    # or skip this and run: jnh login
-export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic, OR
-export GEMINI_API_KEY=...              # Gemini on AI Studio, OR
-export GOOGLE_CLOUD_PROJECT=my-proj    # Gemini on Vertex AI (location defaults to global)
+# Jennah: an API key, or skip this and run `jnh login`
+export JENNAH_API_KEY=jennah_sk_...
+
+# Chat model: pick one
+export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic
+export GEMINI_API_KEY=...             # Gemini on AI Studio
+export GOOGLE_CLOUD_PROJECT=my-proj   # Gemini on Vertex AI
+
 memchat
 ```
+
+On Vertex AI the location defaults to `global`.
 
 `python -m memchat` works the same way from a clone.
 
@@ -55,7 +61,8 @@ id to `memchat-state.json`. Later runs reuse it, which is all it takes for
 memory to carry over between sessions. Type `/exit` or press Ctrl-D to quit.
 
 ```text
-you> Hi! I'm Chew and I live in Osaka. I'm CTO of a company called NightBlue.
+you> Hi! I'm Chew and I live in Osaka. I'm CTO of a company
+called NightBlue.
 
 memo> Nice to meet you, Chew! ...
   [forming memory ...]
@@ -66,7 +73,9 @@ you> Quick correction: I moved to Tokyo last month.
 memo> Got it, thanks for the update! ...
   [forming memory ...]
   [formed: 2 revised, 2 known]
-  [memory] 2 earlier assertion(s) retired by a correction in this turn (superseded, not overwritten: the previous value stays readable as history)
+  [memory] 2 earlier assertion(s) retired by a correction in
+  this turn (superseded, not overwritten: the previous value
+  stays readable as history)
 ```
 
 ## Flags

@@ -1,4 +1,4 @@
-# memchat (Python)
+## memchat (Python)
 
 A command-line chatbot that remembers you across sessions. Tell it about
 yourself, quit, run it again, and it recalls what you said. Memory is kept in

@@ -18,7 +18,7 @@ from typing import Mapping, Optional, Protocol
 
 from .authored import TOOL_DESC, TOOL_NAME, TOOL_PROPERTIES, TOOL_REQUIRED, Fact, fact_from_args
 
-ANTHROPIC_MODEL = "claude-sonnet-5"
+ANTHROPIC_MODEL = "claude-sonnet-5-5"
 # The same id works on AI Studio and on Vertex AI.
 GEMINI_MODEL = "gemini-3.8-flash"
 MAX_TOKENS = 2048

@@ -21,8 +21,10 @@ same workspace, so you can run one and then the other and compare.
 
 - Python 3.10 or later
 - A Jennah credential: a `jennah_sk_` API key, or a session from `jnh login`
-- A chat model: an Anthropic API key, a Gemini (AI Studio) API key, or Gemini on
-  Vertex AI through Application Default Credentials
+- A chat model: an Anthropic API key, Claude on Amazon Bedrock through an AWS
+  profile allowed to call `bedrock:InvokeModel` on the
+  `global.anthropic.claude-sonnet-5-5` inference profile, Gemini on Vertex AI
+  through Application Default Credentials, or a Gemini (AI Studio) API key
 
 ## Install
 
@@ -46,13 +48,25 @@ export JENNAH_API_KEY=jennah_sk_...
 
 # Chat model: pick one
 export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic
-export GEMINI_API_KEY=...             # Gemini on AI Studio
 export GOOGLE_CLOUD_PROJECT=my-proj   # Gemini on Vertex AI
+export GEMINI_API_KEY=...             # Gemini on AI Studio
 
 memchat
 ```
 
-On Vertex AI the location defaults to `global`.
+With no `--provider`, memchat uses Anthropic when its key is set, otherwise
+Gemini. On Vertex AI the location defaults to `global`.
+
+Claude on Amazon Bedrock is never picked automatically. Choose it and name the
+AWS profile:
+
+```sh
+memchat --provider bedrock --aws-profile my-profile   # --aws-region defaults to ap-northeast-1
+```
+
+Pass the profile with `--aws-profile` rather than `AWS_PROFILE`: when
+`AWS_ACCESS_KEY_ID` is also exported, it silently takes precedence over
+`AWS_PROFILE`, and the calls run in that key's account instead.
 
 `python -m memchat` works the same way from a clone.
 
@@ -86,7 +100,9 @@ memo> Got it, thanks for the update! ...
 | `--insecure` | off | Connect without TLS, for a local plaintext server |
 | `--state` | `memchat-state.json` | File holding the workspace id |
 | `--agent` | | Use this existing workspace instead of the state file. Never creates one and never writes the state file |
-| `--provider` | `auto` | `auto`, `anthropic` or `gemini`. `auto` picks Anthropic if its key is set, otherwise Gemini |
+| `--provider` | `auto` | `auto`, `anthropic`, `bedrock` or `gemini`. `auto` picks Anthropic if its key is set, otherwise Gemini, and never Bedrock |
+| `--aws-region` | `ap-northeast-1` | AWS region for `--provider bedrock` |
+| `--aws-profile` | | AWS named profile for `--provider bedrock`. Empty uses the default credential chain |
 | `--region` | `$JENNAH_REGION` | Home region for a new workspace. Only applied at creation |
 | `--jennah-api-key` | | Jennah API key. Falls back to `$JENNAH_API_KEY`, then the `jnh login` session |
 | `--anthropic-api-key` | | Anthropic key. Falls back to `$ANTHROPIC_API_KEY` |
@@ -101,8 +117,14 @@ Secrets are never flag defaults, so `--help` does not print them.
    snippets, and `memory:inspect` reads the knowledge graph back as triples.
    Edges whose validity has ended (retired by a correction) are left out of the
    prompt and counted, as in `(+1 retired, not shown)`.
-2. **Answer.** The chat model gets a system prompt built from that recall. In
-   the default mode it has no tools and no instruction about what to remember.
+2. **Answer.** The chat model gets a fixed persona plus that recall. In the
+   default mode it has no tools and no instruction about what to remember.
+   Claude gets the persona as a system prompt that never changes during a
+   session, and each turn's recall as a `role: "system"` message after the
+   user's message. Rebuilding the system prompt every turn would invalidate
+   earlier thinking blocks, which newer Anthropic organizations reject with a
+   400 on the second turn. Older recall stays in the transcript, so long
+   sessions use more input tokens.
 3. **Form.** The reply is printed first, then the last 6 turns go to
    `memory:form`. Each formation carries a key, `frm_<session>_<turn>`, so a
    retry replays the original receipt instead of extracting twice, and saying

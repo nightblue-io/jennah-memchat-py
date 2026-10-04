@@ -36,7 +36,7 @@ from jennah.agent.v1 import memory_pb2
 
 from . import jennah_io
 from .authored import STORE_INSTRUCTION, commit_request, rand_id, seed_request
-from .brain import Brain, new_brain
+from .brain import DEFAULT_AWS_REGION, Brain, new_brain
 from .receipt import commit_lines, formation_lines
 
 # How many recent turns each formation submits: the current exchange plus the two
@@ -101,8 +101,12 @@ def describe(err: BaseException) -> str:
     return str(err)
 
 
-def build_system_prompt(rec: jennah_io.Recall, authored: bool) -> str:
-    """The turn's system prompt, from what Jennah recalled.
+def build_persona(authored: bool) -> str:
+    """The fixed half of the system prompt: who the model is and what it is for.
+
+    It must come out the same on every turn of a session (the Claude brain sends it
+    as a top-level system prompt that may not change mid-conversation), so it reads
+    nothing but the arm, fixed at startup. Recalled memory goes in build_recall.
 
     The instruction about STORING memory appears only in the authored arm, and its
     absence by default is not a simplification: a prompt telling the model what to
@@ -111,11 +115,17 @@ def build_system_prompt(rec: jennah_io.Recall, authored: bool) -> str:
     """
     parts = [
         "You are Memo, a warm, concise assistant with long-term memory that persists across sessions. "
-        "Personalize using the remembered context below and refer back to it naturally. "
+        "Each user message is followed by what you remember that is relevant to it. Personalize using "
+        "that remembered context and refer back to it naturally; the most recent one is current. "
     ]
     if authored:
         parts.append(STORE_INSTRUCTION)
-    parts.append("\n\n# What you already know (knowledge graph)\n")
+    return "".join(parts)
+
+
+def build_recall(rec: jennah_io.Recall) -> str:
+    """What Jennah recalled for this turn."""
+    parts = ["# What you already know (knowledge graph)\n"]
     if rec.facts:
         parts.extend(f"- {f}\n" for f in rec.facts)
     else:
@@ -173,7 +183,7 @@ class Chat:
             self.out("dim", f"[{summary}]")
 
         try:
-            reply, facts = self.brain.chat(build_system_prompt(rec, self.authored), line)
+            reply, facts = self.brain.chat(build_persona(self.authored), build_recall(rec), line)
         except Exception as e:  # the vendor SDKs raise their own types
             self.out("err", f"error: chat model: {e}")
             return
@@ -236,8 +246,14 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                         "workspace provisioned out of band (e.g. one with a vocabulary declared on it). "
                         "Never creates and never writes the state file")
     p.add_argument("--provider", default="auto",
-                   help="chat model: auto|gemini|anthropic (auto prefers Anthropic, else Gemini, "
-                        "by which credentials are set)")
+                   help="chat model: auto|anthropic|bedrock|gemini (auto prefers Anthropic, else Gemini, "
+                        "by which credentials are set; bedrock is Claude on Amazon Bedrock and is never "
+                        "picked by auto)")
+    p.add_argument("--aws-region", default=DEFAULT_AWS_REGION,
+                   help="AWS region for --provider bedrock")
+    p.add_argument("--aws-profile", default="",
+                   help="AWS named profile for --provider bedrock; empty uses the default credential chain. "
+                        "Prefer this over AWS_PROFILE, which exported AWS_ACCESS_KEY_ID silently overrides")
     # The region is not a secret, so its env var may be the default.
     p.add_argument("--region", default=os.environ.get("JENNAH_REGION", ""),
                    help="home region for a NEW workspace (e.g. us-central1), also read from $JENNAH_REGION; "
@@ -282,7 +298,8 @@ def main(argv: Optional[list[str]] = None, out: Optional[Out] = None) -> int:
         client = connect(args)
         anthropic_key = args.anthropic_api_key.strip() or os.environ.get("ANTHROPIC_API_KEY", "")
         try:
-            brain = new_brain(args.provider, anthropic_key, args.authored)
+            brain = new_brain(args.provider, anthropic_key, args.authored,
+                              aws_region=args.aws_region, aws_profile=args.aws_profile)
         except ValueError as e:
             raise jennah_io.StartupError(str(e)) from None
         out("plain", f"chat model: {brain.label}")

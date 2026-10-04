@@ -14,7 +14,7 @@ from fake import API_KEY
 from memchat import __main__ as app
 from memchat import jennah_io
 from memchat.authored import Fact, commit_request, node_id, norm_rel, seed_request
-from memchat.brain import AnthropicBrain, GeminiBrain, select_provider
+from memchat.brain import AnthropicBrain, GeminiBrain, bedrock_brain, select_provider
 from memchat.receipt import commit_lines, formation_lines
 
 
@@ -40,9 +40,11 @@ class FakeBrain:
         self.reply = reply
         self.facts = facts or []
         self.systems = []
+        self.personas = []
 
-    def chat(self, system, user_msg):
-        self.systems.append(system)
+    def chat(self, persona, recall, user_msg):
+        self.personas.append(persona)
+        self.systems.append(persona + "\n\n" + recall)
         return self.reply, list(self.facts)
 
 
@@ -251,6 +253,16 @@ def test_auto_provider_selection():
         select_provider("openai", "", {})
 
 
+def test_bedrock_is_explicit_only():
+    assert select_provider("bedrock", "", {}) == "bedrock"
+    # AWS credentials in the environment are no sign of intent, so auto never picks it.
+    aws = {"AWS_ACCESS_KEY_ID": "AKIA", "AWS_SECRET_ACCESS_KEY": "s", "AWS_PROFILE": "p"}
+    with pytest.raises(ValueError, match="no chat credentials"):
+        select_provider("auto", "", aws)
+    with pytest.raises(ValueError, match="needs an AWS region"):
+        bedrock_brain(False, "", "p")
+
+
 class _AnthropicStub:
     def __init__(self, responses):
         self.requests = []
@@ -270,9 +282,24 @@ def _text_resp(text):
 def test_anthropic_default_arm_sends_no_tools():
     stub = _AnthropicStub([_text_resp("hello")])
     b = AnthropicBrain("", offer_tool=False, client=stub)
-    assert b.chat("sys", "hi") == ("hello", [])
+    assert b.chat("persona", "recall", "hi") == ("hello", [])
     assert "tools" not in stub.requests[0]
-    assert stub.requests[0]["system"] == "sys"
+    assert stub.requests[0]["system"] == "persona"
+
+
+def test_anthropic_recall_is_appended_never_edited():
+    # The persona stays the top-level system prompt and each turn's recall is a
+    # system message after the user's, so every request extends the last one
+    # instead of rewriting it (earlier thinking blocks are bound to that prefix).
+    stub = _AnthropicStub([_text_resp("one"), _text_resp("two")])
+    b = AnthropicBrain("", offer_tool=False, client=stub)
+    b.chat("persona", "recall 1", "hi")
+    b.chat("persona", "recall 2", "again")
+    first, second = stub.requests
+    assert first["messages"] == [{"role": "user", "content": "hi"}, {"role": "system", "content": "recall 1"}]
+    assert second["system"] == first["system"] == "persona"
+    assert second["messages"][:2] == first["messages"]
+    assert second["messages"][3:] == [{"role": "user", "content": "again"}, {"role": "system", "content": "recall 2"}]
 
 
 def test_anthropic_authored_arm_collects_facts():
@@ -282,7 +309,7 @@ def test_anthropic_authored_arm_collects_facts():
         _text_resp("noted!"),
     ])
     b = AnthropicBrain("", offer_tool=True, client=stub)
-    reply, facts = b.chat("sys", "I live in Tokyo")
+    reply, facts = b.chat("persona", "recall", "I live in Tokyo")
     assert reply == "noted!" and facts == [Fact("", "lives in", "Tokyo")]
     assert stub.requests[0]["tools"][0]["name"] == "remember_fact"
     assert stub.requests[1]["messages"][-1]["content"][0]["tool_use_id"] == "t1"
@@ -307,14 +334,15 @@ class _GeminiStub:
 def test_gemini_default_arm_sends_no_tools():
     stub = _GeminiStub("hi there")
     b = GeminiBrain(False, {"GEMINI_API_KEY": "k"}, client=stub)
-    assert b.chat("sys", "hi") == ("hi there", [])
+    assert b.chat("persona", "recall", "hi") == ("hi there", [])
     assert not stub.configs[0].tools
+    assert stub.configs[0].system_instruction == "persona\n\nrecall"
     assert b.label.endswith("(ai-studio)")
 
 
 def test_gemini_authored_arm_offers_remember_fact():
     stub = _GeminiStub("ok")
-    GeminiBrain(True, {"GEMINI_API_KEY": "k"}, client=stub).chat("sys", "hi")
+    GeminiBrain(True, {"GEMINI_API_KEY": "k"}, client=stub).chat("persona", "recall", "hi")
     decl = stub.configs[0].tools[0].function_declarations[0]
     assert decl.name == "remember_fact"
     assert set(decl.parameters.properties) == {"subject", "relationship", "object"}
@@ -331,6 +359,17 @@ def test_default_prompt_has_no_store_instruction(fake, client):
     c, _ = chat(client, fake, brain=brain)
     c.turn("hi")
     assert "remember_fact" not in brain.systems[0] and "store" not in brain.systems[0].lower()
+
+
+def test_persona_is_fixed_across_turns(fake, client):
+    brain = FakeBrain()
+    c, _ = chat(client, fake, brain=brain)
+    c.turn("hi")
+    fake.query = m.QueryMemoryResponse(semantic=m.SemanticResult(matches=[m.SemanticMatch(
+        chunk_id="c1", raw_content="User likes hiking")]))
+    c.turn("again")
+    assert brain.personas[0] == brain.personas[1]
+    assert "User likes hiking" not in brain.personas[1] and "- User likes hiking" in brain.systems[1]
 
 
 # ---- 3.2 the turn loop ----
